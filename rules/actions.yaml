@@ -1,0 +1,231 @@
+# Simple, explicit mapping from classification -> list of actions (+ params)
+# You can reference environment variables with {env:VAR_NAME}
+# and email fields with {subject}, {from_email}, {internet_message_id}, etc.
+
+classifications:
+
+  invoice.unpaid:
+    actions:
+      - forward:
+          to: ["{env:XERO_INBOX}"]
+          note: ""
+      - move:
+          folder_id: "{env:FOLDER_AP}"
+      - create_jira:
+          project: "{env:JIRA_PROJECT_KEY}"
+          issue_type: "{env:JIRA_ISSUE_TYPE_TASK}"
+          assignee: "{env:JIRA_ASSIGNEE_ANGELI}"
+          summary: "{subject}"
+          priority: "{env:JIRA_PRIORITY_MEDIUM}"
+          customfield_10482: "{env:JIRA_EMAIL_CATEGORY_SUPPLIER}"   # Email Category
+          customfield_10449: "{env:JIRA_TASK_TYPE_ONCE_OFF}"        # Task Type
+          customfield_10515: "{env:JIRA_ENTITY_GEIDI_PTY}"          # Entity
+          transition: "{env:JIRA_TRANSITION_AP_PROCESS}"
+
+  invoice.overdue:
+    actions:
+      - forward:
+          to: ["{env:XERO_INBOX}"]
+          note: ""
+      - flag:
+          reason: "Overdue invoice"
+      - move:
+          folder_id: "{env:FOLDER_AP}"
+      - create_jira:
+          project: "{env:JIRA_PROJECT_KEY}"
+          issue_type: "{env:JIRA_ISSUE_TYPE_TASK}"
+          assignee: "{env:JIRA_ASSIGNEE_ANGELI}"
+          summary: "{subject}"
+          priority: "{env:JIRA_PRIORITY_MEDIUM}"
+          customfield_10482: "{env:JIRA_EMAIL_CATEGORY_SUPPLIER}"   # Email Category
+          customfield_10449: "{env:JIRA_TASK_TYPE_ONCE_OFF}"        # Task Type
+          customfield_10515: "{env:JIRA_ENTITY_GEIDI_PTY}"          # Entity
+          transition: "{env:JIRA_TRANSITION_AP_PROCESS}"
+
+  invoice.paid:
+    actions:
+      - forward:
+          to: ["{env:XERO_INBOX}"]
+          note: ""
+      - move:
+          folder_id: "{env:FOLDER_AR}"
+
+  remittance:
+    actions:
+      - move:
+          folder_id: "{env:FOLDER_REM}"
+
+  soa:
+    actions:
+      - flag:
+          reason: "Statement of Account"
+      - move:
+          folder_id: "{env:FOLDER_AP}"
+      - create_jira:
+          project: "{env:JIRA_PROJECT_KEY}"
+          issue_type: "{env:JIRA_ISSUE_TYPE_TASK}"
+          assignee: "{env:JIRA_ASSIGNEE_ANGELI}"
+          summary: "{subject}"
+          priority: "{env:JIRA_PRIORITY_MEDIUM}"
+          customfield_10482: "{env:JIRA_EMAIL_CATEGORY_SUPPLIER}"   # Email Category
+          customfield_10449: "{env:JIRA_TASK_TYPE_ONCE_OFF}"        # Task Type
+          customfield_10515: "{env:JIRA_ENTITY_GEIDI_PTY}"          # Entity
+          transition: "{env:JIRA_TRANSITION_AP_PROCESS}"
+
+  client.dispute:
+    actions:
+      - move:
+          folder_id: "{env:FOLDER_ACTREQ}"
+      - create_jira:
+          project: "{env:JIRA_PROJECT_KEY}"
+          issue_type: "{env:JIRA_ISSUE_TYPE_TASK}"
+          assignee: "{env:JIRA_ASSIGNEE_RUTH}"
+          summary: "{subject}"
+          priority: "{env:JIRA_PRIORITY_MEDIUM}"
+          customfield_10482: "{env:JIRA_EMAIL_CATEGORY_CLIENT}"   # Email Category
+          customfield_10449: "{env:JIRA_TASK_TYPE_ONCE_OFF}"        # Task Type
+          customfield_10515: "{env:JIRA_ENTITY_GEIDI_PTY}"          # Entity
+          transition: "{env:JIRA_TRANSITION_UPNEXT}"
+
+  procurement.soa:
+    actions:
+      - flag:
+          reason: "Statement of Account"
+      - move:
+          folder_id: "{env:FOLDER_AP}"
+      - create_jira:
+          project: "{env:JIRA_PROJECT_KEY}"
+          issue_type: "{env:JIRA_ISSUE_TYPE_TASK}"
+          assignee: "{env:JIRA_ASSIGNEE_ANGELI}"
+          summary: "{subject}"
+          priority: "{env:JIRA_PRIORITY_MEDIUM}"
+          customfield_10482: "{env:JIRA_EMAIL_CATEGORY_SUPPLIER}"   # Email Category
+          customfield_10449: "{env:JIRA_TASK_TYPE_ONCE_OFF}"        # Task Type
+          customfield_10515: "{env:JIRA_ENTITY_GEIDI_PTY}"          # Entity
+          transition: "{env:JIRA_TRANSITION_AP_PROCESS}"
+
+  procurement.invoice:
+    actions:
+      - forward:
+          to: ["{env:XERO_INBOX}"]
+          note: ""
+      - move:
+          folder_id: "{env:FOLDER_AP}"
+      - create_jira:
+          project: "{env:JIRA_PROJECT_KEY}"
+          issue_type: "{env:JIRA_ISSUE_TYPE_TASK}"
+          assignee: "{env:JIRA_ASSIGNEE_ANGELI}"
+          summary: "{subject}"
+          priority: "{env:JIRA_PRIORITY_MEDIUM}"
+          customfield_10482: "{env:JIRA_EMAIL_CATEGORY_SUPPLIER}"   # Email Category
+          customfield_10449: "{env:JIRA_TASK_TYPE_ONCE_OFF}"        # Task Type
+          customfield_10515: "{env:JIRA_ENTITY_GEIDI_PTY}"          # Entity
+          transition: "{env:JIRA_TRANSITION_AP_PROCESS}"
+
+  delivery_failure:
+    actions:
+      - move:
+          folder_id: "{env:FOLDER_ACTREQ}"
+      - forward:
+          to: ["{env:GEIDI_SUPPORT}"]
+          note: "FYI"
+
+  client.request_copy_invoice:
+    actions:
+      - move:
+          folder_id: "{env:FOLDER_ACTREQ}"
+      - create_jira:
+          project: "{env:JIRA_PROJECT_KEY}"
+          issue_type: "{env:JIRA_ISSUE_TYPE_TASK}"
+          assignee: "{env:JIRA_ASSIGNEE_RUTH}"
+          summary: "{subject}"
+          priority: "{env:JIRA_PRIORITY_MEDIUM}"
+          customfield_10482: "{env:JIRA_EMAIL_CATEGORY_CLIENT}"   # Email Category
+          customfield_10449: "{env:JIRA_TASK_TYPE_ONCE_OFF}"        # Task Type
+          customfield_10515: "{env:JIRA_ENTITY_GEIDI_PTY}"          # Entity
+          transition: "{env:JIRA_TRANSITION_UPNEXT}"
+
+  outsourced.invoice:
+    actions:
+      - forward:
+          to: ["{env:XERO_INBOX}"]
+          note: ""      
+      - move:
+          folder_id: "{env:FOLDER_AP}"
+      - create_jira:
+          project: "{env:JIRA_PROJECT_KEY}"
+          issue_type: "{env:JIRA_ISSUE_TYPE_TASK}"
+          assignee: "{env:JIRA_ASSIGNEE_ANGELI}"
+          summary: "{subject}"
+          priority: "{env:JIRA_PRIORITY_MEDIUM}"
+          customfield_10482: "{env:JIRA_EMAIL_CATEGORY_SUPPLIER}"   # Email Category
+          customfield_10449: "{env:JIRA_TASK_TYPE_ONCE_OFF}"        # Task Type
+          customfield_10515: "{env:JIRA_ENTITY_GEIDI_PTY}"          # Entity
+          transition: "{env:JIRA_TRANSITION_AP_PROCESS}"
+
+  rhipe.usage_confirmation:
+    actions:
+      - move:
+          folder_id: "{env:FOLDER_AR}"
+
+  proofpoint:
+    actions:
+      - move:
+          folder_id: "{env:FOLDER_PP}"
+
+  marketing:
+    actions:
+      - move:
+          folder_id: "{env:FOLDER_ADS}"
+
+  spam:
+    actions:
+      - delete: {}
+
+  default:
+    actions:
+      - move:
+          folder_id: "{env:FOLDER_MISC}"
+      - flag:
+          reason: "No explicit rule"
+
+  invoice.zanovar:
+    actions:
+      - forward:
+          to: "{env:ZANOVAR_MAILBOX}"
+          note: "FYI"
+      - move:
+          folder_id "{env:FOLDER_ZAN}"
+
+  swoop.invoice.zanovar:
+    actions:
+      - forward:
+          to: "{env:ZANOVAR_MAILBOX}"
+          note: "FYI"
+      - move:
+          folder_id "{env:FOLDER_ZAN}"
+
+  vodafone:
+    actions:
+      - move:
+          folder_id "{env:FOLDER_ACTREQ}"
+      - create_jira:
+          project: "{env:JIRA_PROJECT_KEY}"
+          issue_type: "{env:JIRA_ISSUE_TYPE_TASK}"
+          assignee: "{env:JIRA_ASSIGNEE_SUZ}"
+          summary: "{subject}"
+          priority: "{env:JIRA_PRIORITY_MEDIUM}"
+          customfield_10482: "{env:JIRA_EMAIL_CATEGORY_SUPPLIER}"   # Email Category
+          customfield_10449: "{env:JIRA_TASK_TYPE_ONCE_OFF}"        # Task Type
+          customfield_10515: "{env:JIRA_ENTITY_GEIDI_PTY}"          # Entity
+          transition: "{env:JIRA_TRANSITION_UPNEXT}"
+
+
+  atlassian.jab:
+    actions:
+      - move:
+          folder_id "{env:FOLDER_JAB}"
+
+  read.notification:
+    actions:
+      - delete: {}

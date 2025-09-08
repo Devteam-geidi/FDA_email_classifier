@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "email-triage-system"
+version = "0.1.0"
+description = "Email triage with FastAPI, n8n actions, Power Automate escalations, Supabase logging"
+authors = [{ name = "Geidi AI Ops", email = "ops@geidi.com" }]
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "MIT" }
+
+dependencies = [
+  "fastapi>=0.111,<1",
+  "uvicorn[standard]>=0.30,<1",
+  "httpx>=0.27,<1",
+  "pydantic>=2.7,<3",
+  "PyYAML>=6,<7",
+  "openai>=1.40,<2",
+  "supabase>=2.6,<3",
+  "python-multipart>=0.0.9,<1",
+  "pypdf>4.2,<5"
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
