@@ -50,3 +50,27 @@ def _render_value(val: Any, ctx: Dict[str, Any]) -> Any:
 
 def render_action_params(raw_params: Dict[str, Any], email_ctx: Dict[str, Any]) -> Dict[str, Any]:
     return _render_value(raw_params, email_ctx)
+
+EMAIL_POLICY_PATH = "rules/email_policy.yaml"
+
+def load_email_policy() -> dict:
+    try:
+        with open(EMAIL_POLICY_PATH, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+def get_taxonomy_keys() -> list[str]:
+    policy = load_email_policy()
+    taxonomy = policy.get("taxonomy") or {}
+    return list(taxonomy.keys())
+
+def get_taxonomy_options() -> list[dict]:
+    """
+    Returns:
+      [
+        {"title": "<taxonomy.key>", "value": "<taxonomy.key>"},
+        ...
+      ]
+    """
+    return [{"title": k, "value": k} for k in get_taxonomy_keys()]
