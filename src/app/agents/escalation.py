@@ -47,7 +47,7 @@ OUTPUT (JSON only):
 {{
   "proposed_classification": "<one key from AVAILABLE_CLASSIFICATIONS>",
   "rationale": ["bullet evidence"],
-  "guideline_options": {json.dumps(options_objs)}
+  "guideline_options": {json.dumps(options)}
 }}
 """.strip()
 
@@ -56,9 +56,8 @@ def run_escalation_agent(email, triage: dict, action: dict) -> dict:
 
     yaml_rules = load_yaml_rules()
     options = _extract_taxonomy_keys(yaml_rules)              # list[str]
-    options_objs = _build_guideline_options_objects(options)  # list[{"title","value"}]
 
-    prompt = escalation_prompt(email, triage, action, yaml_rules, options, options_objs)
+    prompt = escalation_prompt(email, triage, action, yaml_rules, options, options)
 
     resp = openai_client.responses.create(model=OPENAI_MODEL, input=prompt)
     text = resp.output_text
@@ -69,7 +68,7 @@ def run_escalation_agent(email, triage: dict, action: dict) -> dict:
         if pc not in options:
             parsed["proposed_classification"] = "other"
         # always include the object list for UI
-        parsed["guideline_options"] = options_objs
+        parsed["guideline_options"] = options
         return parsed
     except Exception:
         return {
