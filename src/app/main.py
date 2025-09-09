@@ -1,14 +1,14 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-import os, json
+import os
 import httpx
 from uuid import uuid4
 
 from supabase import create_client
 
 # load rules at startup
-from .utils.rules import load_action_rules
+from app.utils.rules import load_action_rules
 load_action_rules()  # reads rules/actions.yaml at boot
 
 # optional pdf parsing
@@ -19,8 +19,8 @@ except Exception:
 
 # Import agents
 from app.agents.triage import run_triage
-from app.agents.action import run_action_agent, execute_actions
-from app.agents.escalation import run_escalation_agent, send_to_power_automate
+from app.agents.action import run_action_agent, execute_actions, decide_actions
+from app.agents.policy_refiner import update_policy_from_logs
 
 # --- Config ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -55,9 +55,8 @@ class EmailPayload(BaseModel):
 
 class FeedbackPayload(BaseModel):
     nhr_token: str
-    human: Dict[str, Any]
+    human: str | None = None
     final_classification: str
-    actions: List[Dict[str, Any]]
 
 def _normalize_n8n_payload(raw: Dict[str, Any]) -> "EmailPayload":
     """Accepts either our rich EmailPayload or simplified n8n body and returns EmailPayload."""
@@ -124,65 +123,7 @@ def health():
 
 @app.post("/ingest")
 def ingest_email(email_raw: Dict[str, Any]):
-    # normalize (supports both rich EmailPayload and your simplified n8n JSON)
-    email = _normalize_n8n_payload(email_raw)
-
-    # --- intake log (email_logs) ---
-    try:
-        supabase.table("email_logs").insert({
-            "email_id": email.internet_message_id,
-            "message_id": email.message_id,
-            "subject": email.subject,
-            "from_email": email.from_.email,
-            "to_emails": [p.email for p in (email.to or [])],
-            "cc_emails": [p.email for p in (email.cc or [])],
-            "body_text": email.body_text or "",
-            "attachment_links": [a.download_url for a in (email.attachments or [])],
-            "headers": email.headers,
-            "thread_hint": email.headers.get("in_reply_to"),
-            "status": "received"
-        }).execute()
-    except Exception:
-        # never fail the request because of logging
-        pass
-
-    # Augment for agents: original body + extracted PDF text (NOT stored in DB)
-    augmented_body = email.body_text or ""
-    for att in email.attachments:
-        if att.download_url and att.download_url.lower().endswith(".pdf"):
-            txt = _extract_pdf_text(att.download_url)
-            if txt:
-                augmented_body += f"\n\n[Attachment Extract: {att.filename}]\n" + txt[:20000]
-
-    email_for_agents = email.model_copy(update={"body_text": augmented_body})
-
-    # --- triage & log ---
-    triage_result = run_triage(email_for_agents)
-    try:
-        supabase.table("email_decisions").insert({
-            "classification": triage_result["classification"],
-            "confidence": triage_result["confidence"],
-            "rationale": "\n".join(triage_result.get("rationale", [])),
-            "email_id": email.internet_message_id,
-            "stage": "triage"
-        }).execute()
-    except Exception:
-        pass
-
-    # --- action agent & log ---
-    action_result = run_action_agent(email_for_agents, triage_result)
-    try:
-        supabase.table("email_decisions").insert({
-            "classification": action_result["final_classification"],
-            "confidence": action_result["final_confidence"],
-            "rationale": "\n".join(action_result.get("final_rationale", [])),
-            "email_id": email.internet_message_id,
-            "stage": "action",
-            "nhr": action_result["needs_human_review"]
-        }).execute()
-    except Exception:
-        pass
-
+    ...
     executed: List[Dict[str, Any]] = []
     escalation_payload: Optional[Dict[str, Any]] = None
 
@@ -191,12 +132,12 @@ def ingest_email(email_raw: Dict[str, Any]):
         and not action_result.get("needs_human_review")
         and float(action_result.get("final_confidence", 0.0)) >= MIN_AUTOPILOT
     ):
-        # execute actions and audit in action_runs
+        # autopilot path
         executed = execute_actions(email, action_result, supabase=supabase)
+        escalation_payload = None
     else:
-        # escalate
+        # escalate path
         from app.agents.escalation import run_escalation_agent, send_to_power_automate  # lazy import to avoid cycles
-        from uuid import uuid4
 
         nhr_token = f"NHR_{uuid4().hex}"
         try:
@@ -214,7 +155,7 @@ def ingest_email(email_raw: Dict[str, Any]):
 
         escalation_result = run_escalation_agent(email_for_agents, triage_result, action_result)
         escalation_payload = {
-            "email": email.model_dump(),   # links only; no embedded large text
+            "email": email.model_dump(),
             "triage": triage_result,
             "action": action_result,
             "escalation": escalation_result,
@@ -223,27 +164,76 @@ def ingest_email(email_raw: Dict[str, Any]):
         try:
             send_to_power_automate(escalation_payload)
         except Exception:
-            # don't crash ingestion if PA is down
             pass
 
-        # --- finalize intake status (email_logs) ---
-        try:
-            final_status = "executed" if executed else ("escalated" if escalation_payload else "no_action")
-            supabase.table("email_logs").update({
-                "status": final_status
-            }).eq("email_id", email.internet_message_id).execute()
-        except Exception:
-            pass
+    # FINALIZE STATUS for both paths
+    try:
+        final_status = "executed" if executed else ("escalated" if escalation_payload else "no_action")
+        supabase.table("email_logs").update({
+            "status": final_status
+        }).eq("email_id", email.internet_message_id).execute()
+    except Exception:
+        pass
 
-        return {
-            "status": "processed",
-            "triage": triage_result,
-            "action": action_result,
-            "executed": executed,
-            "escalated": escalation_payload is not None
-        }
+    # CONSISTENT RESPONSE for both paths
+    return {
+        "status": "processed",
+        "triage": triage_result,
+        "action": action_result,
+        "executed": executed,
+        "escalated": escalation_payload is not None
+    }
 
 @app.post("/feedback")
 def feedback(p: FeedbackPayload):
-    # TODO: apply human feedback actions
-    return {"status": "feedback received", "final_classification": p.final_classification}
+    # 1) look up the email by nhr_token
+    row = supabase.table("email_decisions").select("email_id") \
+           .eq("nhr_token", p.nhr_token).eq("stage", "nhr").single().execute().data
+    if not row:
+        raise HTTPException(404, "nhr_token not found")
+
+    email_id = row["email_id"]
+    # 2) upsert human decision
+    supabase.table("email_decisions").insert({
+        "email_id": email_id,
+        "stage": "human",
+        "classification": p.final_classification,
+        "confidence": 1.0,
+        "rationale": (p.human or ""),
+        "nhr": False,
+        "nhr_token": p.nhr_token,
+    }).execute()
+
+    # 3) fetch the email payload (from logs) and recompute actions
+    email_log = supabase.table("email_logs").select("*").eq("email_id", email_id).single().execute().data
+    if not email_log:
+        raise HTTPException(404, "email_id not found in email_logs")
+    email = _normalize_n8n_payload({
+        "subject": email_log["subject"],
+        "body": email_log.get("body_text") or "",
+        "from_address": email_log.get("from_email") or "",
+        "message_id": email_log.get("message_id") or email_id,
+        "internet_message_id": email_id,
+        "attachment_links": email_log.get("attachment_links") or [],
+    })
+
+    triage_result = {"classification": p.final_classification, "confidence": 1.0, "rationale": ["human override"]}
+    actions = decide_actions(email, triage_result)      # maps class -> steps from rules/actions.yaml
+    result = {
+        "agree": True,
+        "needs_human_review": False,
+        "final_classification": p.final_classification,
+        "final_confidence": 1.0,
+        "final_rationale": ["human override"],
+        "actions": actions,
+    }
+    receipts = execute_actions(email, result, supabase=supabase)
+    return {"status": "ok", "executed": receipts}
+
+@app.post("/policy/refresh")
+def policy_refresh():
+    try:
+        result = update_policy_from_logs(supabase)
+        return {"status": "ok", **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
