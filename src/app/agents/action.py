@@ -76,7 +76,6 @@ def execute_actions(email, action_result: Dict[str, Any], supabase=None) -> List
         "attachments": [a.dict() if hasattr(a, "dict") else vars(a) for a in (email.attachments or [])],
     }
 
-    # keep a quick lookup of params per action for logging
     action_params_map = {a["action"]: a.get("params", {}) for a in action_result.get("actions", [])}
 
     for step in action_result.get("actions", []):
@@ -87,22 +86,24 @@ def execute_actions(email, action_result: Dict[str, Any], supabase=None) -> List
         if action == "forward" and isinstance(params.get("to"), str):
             params["to"] = [params["to"]]
 
-        res = call_tool(action, payload)  # {"ok","status","body","url"} or {"ok":False,"error","url"}
+        res = call_tool(action, payload)
         receipts.append({"action": action, "ok": res.get("ok"), "detail": res})
 
-        # Supabase audit log (optional)
         if supabase is not None:
             try:
                 supabase.table("action_runs").insert({
-                    "email_id": email.internet_message_id,
+                    # IMPORTANT: include both IDs to satisfy schema and for easy joins
+                    "message_id": email.message_id,                 # <-- added
+                    "email_id": email.internet_message_id,          # keep if you also store this
                     "action": action,
                     "url": res.get("url"),
                     "request": {"params": action_params_map.get(action, {}), "email_id": email.internet_message_id},
                     "response_status": res.get("status"),
-                    "response_body": res.get("body") or res.get("error")
+                    "response_body": res.get("body") or res.get("error"),
                 }).execute()
             except Exception:
-                # don't fail the whole pipeline on logging issues
+                # Consider logging this so schema/RLS issues are visible during dev
+                # log.exception("Failed to insert action_run for message_id=%s", email.message_id)
                 pass
 
     return receipts

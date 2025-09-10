@@ -1,14 +1,16 @@
+# src/app/agents/escalation.py
 import json
 import os
-from app.utils.rules import get_taxonomy_options
 from typing import List
-from openai import OpenAI
 import httpx
-import yaml  # <-- add pyyaml in your deps if not already
+import yaml
+
+from openai import OpenAI
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
 POWER_AUTOMATE_URL = os.getenv("POWER_AUTOMATE_URL")
 openai_client = OpenAI()
+
 
 def _extract_taxonomy_keys(yaml_text: str) -> List[str]:
     """Parse email_policy.yaml text and return sorted list of taxonomy keys."""
@@ -16,23 +18,36 @@ def _extract_taxonomy_keys(yaml_text: str) -> List[str]:
         data = yaml.safe_load(yaml_text) or {}
         taxonomy = data.get("taxonomy", {}) or {}
         keys = [str(k) for k in taxonomy.keys()]
-        # always include 'other' as a safety fallback
         if "other" not in keys:
             keys.append("other")
         return sorted(keys)
     except Exception:
-        # absolute fallback
+        # conservative fallback
         return ["invoice.paid", "invoice.unpaid", "invoice.overdue", "task", "support", "spam", "newsletter", "other"]
 
-def escalation_prompt(email, triage: dict, action: dict, yaml_rules: str, options: list[str], options_objs: list[dict]) -> str:
+
+def escalation_prompt(
+    email,
+    triage: dict,
+    action: dict,
+    yaml_rules: str,
+    options: List[str],
+) -> str:
+    # keep the YAML under control if massive
+    yaml_rules_short = (yaml_rules or "")[:40000]
+
     return f"""
 SYSTEM:
-You are the escalation agent. The action agent flagged this email as needing human review. Summarize the situation clearly, include triage and action rationales, and propose the best guess classification. Do not execute actions.
+You are the escalation agent. The action agent flagged this email as needing human review.
+Summarize the situation clearly, include triage and action rationales, and propose the BEST
+classification strictly from AVAILABLE_CLASSIFICATIONS. Do not execute actions.
 
-YAML_RULES:
-{yaml_rules}
+Return ONLY a single JSON object, no prose before or after.
 
-AVAILABLE_CLASSIFICATIONS (choose one of these, exactly as written):
+YAML_RULES (truncated):
+{yaml_rules_short}
+
+AVAILABLE_CLASSIFICATIONS (choose exactly one):
 {json.dumps(options)}
 
 TRIAGE:
@@ -46,41 +61,52 @@ EMAIL SUBJECT: {email.subject}
 OUTPUT (JSON only):
 {{
   "proposed_classification": "<one key from AVAILABLE_CLASSIFICATIONS>",
-  "rationale": ["bullet evidence"],
+  "rationale": ["short bullet evidence 1", "short bullet evidence 2"],
   "guideline_options": {json.dumps(options)}
 }}
 """.strip()
 
+
 def run_escalation_agent(email, triage: dict, action: dict) -> dict:
-    from app.agents.triage import load_yaml_rules
+    # Avoid import cycles; if you have a central loader, import it here.
+    from app.agents.triage import load_yaml_rules  # lazy import
 
-    yaml_rules = load_yaml_rules()
-    options = _extract_taxonomy_keys(yaml_rules)              # list[str]
+    yaml_rules = load_yaml_rules() or ""
+    options = _extract_taxonomy_keys(yaml_rules)  # list[str]
 
-    prompt = escalation_prompt(email, triage, action, yaml_rules, options, options)
+    prompt = escalation_prompt(email, triage, action, yaml_rules, options)
 
+    # Call OpenAI Responses API
     resp = openai_client.responses.create(model=OPENAI_MODEL, input=prompt)
-    text = resp.output_text
+    text = getattr(resp, "output_text", None) or getattr(resp, "content", None) or ""
+
     try:
         parsed = json.loads(text)
-        # harden: ensure the proposed_classification is one of the options
+        # Harden: ensure proposed_classification is one of the available options
         pc = parsed.get("proposed_classification")
         if pc not in options:
             parsed["proposed_classification"] = "other"
-        # always include the object list for UI
         parsed["guideline_options"] = options
         return parsed
     except Exception:
         return {
             "proposed_classification": "other",
-            "rationale": ["Parse error"],
-            "guideline_options": options_objs
+            "rationale": ["Parse error or non-JSON response"],
+            "guideline_options": options,  # <-- fixed from undefined options_objs
         }
 
+
 def send_to_power_automate(payload: dict) -> dict:
+    if not POWER_AUTOMATE_URL:
+        return {"status": "skipped", "error": "POWER_AUTOMATE_URL not configured"}
+
     try:
-        res = httpx.post(POWER_AUTOMATE_URL, json=payload)
-        return {"status": "ok", "resp": res.json()}
+        res = httpx.post(POWER_AUTOMATE_URL, json=payload, timeout=15)
+        # Be defensive about JSON decoding
+        try:
+            body = res.json()
+        except Exception:
+            body = {"text": res.text[:2000]}
+        return {"status": "ok" if res.status_code < 400 else "error", "code": res.status_code, "resp": body}
     except Exception as e:
         return {"status": "failed", "error": str(e)}
- 

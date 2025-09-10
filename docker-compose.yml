@@ -5,6 +5,12 @@ services:
       dockerfile: Dockerfile
     container_name: email-triage-api
     env_file: .env
+    environment:
+      # override any .env mismatch so writer & reader use the same file
+      EMAIL_POLICY_PATH: /app/rules/email_policy.yaml
+    volumes:
+      # bind host ./rules to container /app/rules so changes + .history appear locally
+      - ./rules:/app/rules
     ports:
       - "8000:8000"
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000

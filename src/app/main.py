@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import os
+import logging
 import httpx
 from uuid import uuid4
 
@@ -19,7 +20,7 @@ except Exception:
 
 # Import agents
 from app.agents.triage import run_triage
-from app.agents.action import run_action_agent, execute_actions, decide_actions
+from app.agents.action import run_action_agent, execute_actions
 from app.agents.policy_refiner import update_policy_from_logs
 
 # --- Config ---
@@ -123,7 +124,64 @@ def health():
 
 @app.post("/ingest")
 def ingest_email(email_raw: Dict[str, Any]):
-    ...
+    # normalize (supports both rich EmailPayload and your simplified n8n JSON)
+    email = _normalize_n8n_payload(email_raw)
+
+    # --- intake log (email_logs) ---
+    try:
+        supabase.table("email_logs").insert({
+            "email_id": email.internet_message_id,
+            "message_id": email.message_id,
+            "subject": email.subject,
+            "from_email": email.from_.email,
+            "to_emails": [p.email for p in (email.to or [])],
+            "cc_emails": [p.email for p in (email.cc or [])],
+            "body_text": email.body_text or "",
+            "attachment_links": [a.download_url for a in (email.attachments or [])],
+            "headers": email.headers,
+            "thread_hint": email.headers.get("in_reply_to"),
+            "status": "received"
+        }).execute()
+    except Exception:
+        # never fail the request because of logging
+        pass
+
+    # Augment for agents: original body + extracted PDF text (NOT stored in DB)
+    augmented_body = email.body_text or ""
+    for att in email.attachments:
+        if att.download_url and att.download_url.lower().endswith(".pdf"):
+            txt = _extract_pdf_text(att.download_url)
+            if txt:
+                augmented_body += f"\n\n[Attachment Extract: {att.filename}]\n" + txt[:20000]
+
+    email_for_agents = email.model_copy(update={"body_text": augmented_body})
+
+    # --- triage & log ---
+    triage_result = run_triage(email_for_agents)
+    try:
+        supabase.table("email_decisions").insert({
+            "classification": triage_result["classification"],
+            "confidence": triage_result["confidence"],
+            "rationale": "\n".join(triage_result.get("rationale", [])),
+            "email_id": email.internet_message_id,
+            "stage": "triage"
+        }).execute()
+    except Exception:
+        pass
+
+    # --- action agent & log ---
+    action_result = run_action_agent(email_for_agents, triage_result)
+    try:
+        supabase.table("email_decisions").insert({
+            "classification": action_result["final_classification"],
+            "confidence": action_result["final_confidence"],
+            "rationale": "\n".join(action_result.get("final_rationale", [])),
+            "email_id": email.internet_message_id,
+            "stage": "action",
+            "nhr": action_result["needs_human_review"]
+        }).execute()
+    except Exception:
+        pass
     executed: List[Dict[str, Any]] = []
     escalation_payload: Optional[Dict[str, Any]] = None
 
@@ -184,51 +242,112 @@ def ingest_email(email_raw: Dict[str, Any]):
         "escalated": escalation_payload is not None
     }
 
+from postgrest.exceptions import APIError
+log = logging.getLogger("email-triage")
+
 @app.post("/feedback")
 def feedback(p: FeedbackPayload):
-    # 1) look up the email by nhr_token
-    row = supabase.table("email_decisions").select("email_id") \
-           .eq("nhr_token", p.nhr_token).eq("stage", "nhr").single().execute().data
+    log.info("FEEDBACK start nhr_token=%s", p.nhr_token)
+
+    # 1) Find email_id via the NHR row that owns this unique token
+    row = (
+        supabase.table("email_decisions")
+        .select("email_id")
+        .eq("nhr_token", p.nhr_token)
+        .eq("stage", "nhr")
+        .single()
+        .execute()
+        .data
+    )
     if not row:
         raise HTTPException(404, "nhr_token not found")
-
     email_id = row["email_id"]
-    # 2) upsert human decision
-    supabase.table("email_decisions").insert({
-        "email_id": email_id,
-        "stage": "human",
-        "classification": p.final_classification,
-        "confidence": 1.0,
-        "rationale": (p.human or ""),
-        "nhr": False,
-        "nhr_token": p.nhr_token,
-    }).execute()
 
-    # 3) fetch the email payload (from logs) and recompute actions
-    email_log = supabase.table("email_logs").select("*").eq("email_id", email_id).single().execute().data
+    # 2) Record a human audit row (NO nhr_token to avoid UNIQUE collision)
+    try:
+        supabase.table("email_decisions").insert(
+            {
+                "email_id": email_id,
+                "stage": "human",
+                "classification": p.final_classification,
+                "confidence": 1.0,
+                "rationale": (p.human or ""),
+                "nhr": False,
+            }
+        ).execute()
+    except APIError as e:
+        # If a human row already exists, target it precisely
+        if getattr(e, "code", None) == "23505":
+            supabase.table("email_decisions").update(
+                {
+                    "classification": p.final_classification,
+                    "confidence": 1.0,
+                    "rationale": (p.human or ""),
+                    "nhr": False,
+                }
+            ).eq("email_id", email_id).eq("stage", "human").execute()
+        else:
+            raise HTTPException(status_code=400, detail=f"Failed to record human decision: {getattr(e, 'message', str(e))}")
+
+    # 3) Persist the final_* onto email_logs (authoritative downstream source)
+    supabase.table("email_logs").update(
+        {
+            "final_classification": p.final_classification,
+            "final_confidence": 1.0,
+        }
+    ).eq("email_id", email_id).execute()
+
+    # 4) Fetch the updated email_log and build the email object
+    email_log = (
+        supabase.table("email_logs")
+        .select("*")
+        .eq("email_id", email_id)
+        .single()
+        .execute()
+        .data
+    )
     if not email_log:
         raise HTTPException(404, "email_id not found in email_logs")
-    email = _normalize_n8n_payload({
-        "subject": email_log["subject"],
-        "body": email_log.get("body_text") or "",
-        "from_address": email_log.get("from_email") or "",
-        "message_id": email_log.get("message_id") or email_id,
-        "internet_message_id": email_id,
-        "attachment_links": email_log.get("attachment_links") or [],
-    })
 
-    triage_result = {"classification": p.final_classification, "confidence": 1.0, "rationale": ["human override"]}
-    actions = decide_actions(email, triage_result)      # maps class -> steps from rules/actions.yaml
-    result = {
-        "agree": True,
-        "needs_human_review": False,
-        "final_classification": p.final_classification,
-        "final_confidence": 1.0,
-        "final_rationale": ["human override"],
-        "actions": actions,
+    email = _normalize_n8n_payload(
+        {
+            "subject": email_log["subject"],
+            "body": email_log.get("body_text") or "",
+            "from_address": email_log.get("from_email") or "",
+            "message_id": email_log.get("message_id") or email_id,
+            "internet_message_id": email_id,
+            "attachment_links": email_log.get("attachment_links") or [],
+        }
+    )
+
+    # 5) Build triage_result strictly from email_logs
+    final_cls = email_log.get("final_classification")
+    final_conf = email_log.get("final_confidence")
+    if final_cls is None or final_conf is None:
+        raise HTTPException(500, "final_* fields missing on email_logs after update")
+
+    triage_result = {
+        "classification": final_cls,
+        "confidence": final_conf,
+        "rationale": ["human override"],
     }
-    receipts = execute_actions(email, result, supabase=supabase)
-    return {"status": "ok", "executed": receipts}
+
+    # 6) Run the action agent
+    action_result = run_action_agent(email, triage_result)
+
+    # 7) ENFORCE THE GUARD:
+    # If confidence is below MIN_AUTOPILOT, do NOT execute actions.
+    if action_result.get("needs_human_review"):
+        # Optionally: write a review-queue row here.
+        return {
+            "status": "pending",
+            "reason": "Low confidence, needs human review",
+            "action_result": action_result,
+        }
+
+    # 8) Execute actions only when needs_human_review == False
+    receipts = execute_actions(email, action_result, supabase=supabase)
+    return {"status": "ok", "executed": receipts, "action_result": action_result}
 
 @app.post("/policy/refresh")
 def policy_refresh():

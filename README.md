@@ -110,60 +110,8 @@ docker-compose.yml       # Local orchestration
 ---
 
 ## Deployment
-Local Development
+- **Local Dev**: `uvicorn` + `ngrok`
+- **Dockerized**: `docker compose up`
+- **Prod**: Run container behind reverse proxy (NGINX/Traefik) and secure TLS.
 
-Run with hot reload:
-
-uvicorn app.main:app --reload --port 8000
-
-
-Or with Docker:
-
-docker compose up --build
-
-
-Expose for webhook testing:
-
-ngrok http 8000
-
-Production (Render + GitHub Auto-Deploy)
-
-Repo is connected to Render
-.
-
-Every push to main (or the tracked branch) triggers:
-
-Render fetches the latest code from GitHub.
-
-Build step runs (pyproject.toml / Dockerfile).
-
-Service container is deployed.
-
-Health check (GET /) ensures it’s running before going live.
-
-Environment variables (.env) are not in GitHub.
-Configure them via the Render Dashboard → Environment:
-
-OPENAI_API_KEY
-
-SUPABASE_URL
-
-SUPABASE_KEY
-
-POWER_AUTOMATE_URL
-
-N8N_BASE_URL
-
-…and other service-specific keys.
-
-Render keeps a deploy history, so you can roll back to previous versions.
-
-Workflow:
-
-# develop locally
-git checkout -b feature/fix-escalation
-# commit + test
-git commit -m "Fix escalation agent guideline options"
-git push origin feature/fix-escalation
-# open PR -> merge into main
-# Render auto-builds & deploys to production
+& "C:\Users\rey\Downloads\ngrok-v3-stable-windows-amd64\ngrok.exe" http http://localhost:8000
