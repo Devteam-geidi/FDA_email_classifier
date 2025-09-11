@@ -9,6 +9,7 @@ from ..utils.rules import (
     render_action_params,
     _flatten_email_for_template,
 )
+from ..utils.message_id_helper import replace_message_id_everywhere
 
 # Confidence threshold for auto-pilot (also used by /ingest orchestrator)
 MIN_AUTOPILOT = float(os.getenv("MIN_AUTOPILOT", "0.75"))
@@ -89,6 +90,27 @@ def execute_actions(email, action_result: Dict[str, Any], supabase=None) -> List
         res = call_tool(action, payload)
         receipts.append({"action": action, "ok": res.get("ok"), "detail": res})
 
+        # --- NEW: if a move returns a new message id, propagate it everywhere ---
+        if supabase is not None and action == "move" and res.get("ok"):
+            # Accept several possible field names the tool might return
+            new_msg = (
+                res.get("new_message_id")
+                or res.get("message_id")
+                or (res.get("headers") or {}).get("x-new-message-id")
+            )
+            if new_msg and new_msg != email.message_id:
+                try:
+                    replace_message_id_everywhere(
+                        supabase,
+                        old_message_id=email.message_id,
+                        new_message_id=new_msg,
+                    )
+                    # Update our local meta too (so subsequent actions/logs use the new id)
+                    meta["message_id"] = new_msg
+                except Exception:
+                    # Don't fail the whole pipeline if this bookkeeping hiccups
+                    pass
+                
         if supabase is not None:
             try:
                 supabase.table("action_runs").insert({
