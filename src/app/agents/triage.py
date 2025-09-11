@@ -1,9 +1,21 @@
 import json
+from dotenv import load_dotenv
 from openai import OpenAI
 import os
 
+# Load .env variables
+load_dotenv()
+
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
-openai_client = OpenAI()
+
+openai_client = OpenAI(
+    base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+    api_key=os.getenv("OPENAI_API_KEY"),
+    default_headers={
+        "Helicone-Auth": f"Bearer {os.getenv('HELICONE_API_KEY')}",  # Helicone API key fron env
+        "Helicone-Property-Project": "Email-Triage-System"            
+    }
+)
 
 
 def load_yaml_rules() -> str:
