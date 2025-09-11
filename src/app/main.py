@@ -42,6 +42,7 @@ class Attachment(BaseModel):
     download_url: str
 
 class EmailPayload(BaseModel):
+    account: Optional[str] = None
     message_id: str
     internet_message_id: str
     subject: str
@@ -84,6 +85,7 @@ def _normalize_n8n_payload(raw: Dict[str, Any]) -> "EmailPayload":
         attachments.append(Attachment(filename=fname, content_type=ctype, download_url=link))
 
     return EmailPayload(
+        account=raw.get("account"),
         message_id=str(msg_id),
         internet_message_id=str(internet_id),
         subject=str(subject),
@@ -213,6 +215,7 @@ def ingest_email(email_raw: Dict[str, Any]):
 
         escalation_result = run_escalation_agent(email_for_agents, triage_result, action_result)
         escalation_payload = {
+            "account": email.account, 
             "email": email.model_dump(),
             "triage": triage_result,
             "action": action_result,

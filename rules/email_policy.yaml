@@ -7,99 +7,120 @@ defaults:
 # Make sure every key here also exists (with actions) in rules/actions.yaml.
 taxonomy:
   invoice.paid:
+    group: Accounts Receivable
     description: Invoice with explicit payment confirmation or receipt.
     must_have:
       - terms_any: ["paid", "payment received", "receipt", "payment confirmation"]
 
   invoice.unpaid:
+    group: Accounts Payable
     description: Invoice issued and not yet paid; may include due date.
     must_have:
       - terms_any: ["invoice", "amount due", "due date", "total", "pay by"]
 
   invoice.overdue:
+    group: Accounts Payable
     description: Invoice past due date or marked overdue.
     must_have:
       - terms_any: ["overdue", "past due", "reminder to pay", "late payment"]
 
   remittance:
+    group: Remittance
     description: Remittance advice or payment confirmation with remittance details.
     must_have:
       - terms_any: ["remittance", "payment advice", "paid amount", "remitted"]
 
   soa:
+    group: Accounts Payable
     description: Statement of Account sent by supplier.
     must_have:
       - terms_any: ["statement of account", "SOA", "account statement"]
 
   client.dispute:
+    group: Action Required
     description: Client disputing a charge, invoice, or service.
     must_have:
       - terms_any: ["dispute", "disputing", "incorrect charge", "charge dispute", "billing dispute"]
 
   procurement.soa:
+    group: Accounts Payable
     description: Vendor statement of account related to procurement/purchasing.
     must_have:
       - terms_any: ["statement of account", "SOA", "vendor statement", "purchasing", "statement", "FYI", "For your handling"]
 
   procurement.invoice:
+    group: Accounts Payable
     description: Procurement-related invoice (purchase orders, vendor bills).
     must_have:
       - terms_any: ["invoice", "purchase order", "PO", "vendor bill", "FYI", "For your handling"]
 
   delivery_failure:
+    group: Action Required
     description: Mail delivery failure/bounce notifications.
     must_have:
       - terms_any: ["delivery has failed", "undeliverable", "bounce", "returned mail", "mailer-daemon"]
 
   client.request_copy_invoice:
+    group: Action Required
     description: Client requests a copy of an invoice or invoice details.
     must_have:
       - terms_any: ["request copy", "send invoice copy", "copy of invoice", "resend invoice"]
 
   outsourced.invoice:
+    group: Accounts Payable
     description: Invoice from an outsourced vendor/contractor.
     must_have:
       - terms_any: ["invoice", "contractor invoice", "outsourced", "subcontractor"]
 
   rhipe.usage_confirmation:
+    group: Accounts Receivable
     description: Rhipe/MSP usage confirmation or monthly usage statements.
     must_have:
       - terms_any: ["usage confirmation", "usage report", "consumption", "rhipe"]
 
   proofpoint:
+    group: Proofpoint
     description: Proofpoint notifications (quarantine, digest, security alerts).
     must_have:
       - terms_any: ["proofpoint", "quarantine", "digest", "security alert"]
 
   marketing:
+    group: Promotional Emails
     description: Marketing/promotional emails.
     must_have:
       - terms_any: ["unsubscribe", "promotion", "offer", "sale", "newsletter", "marketing"]
 
   spam:
+    group: DELETE
     description: Unsolicited or irrelevant emails; obvious spam indicators.
     must_not_have:
       - terms_any: ["company internal", "invoice number", "statement of account"]
     must_have_any:
       - ["lottery", "win money", "viagra", "crypto scheme", "adult content", "get rich quick", "spam"]
 
-  other:
-    description: Anything that doesn’t match other categories.
+#REMOVED SO THAT AI DOESNT USE THIS CLASSIFICATIONAND JUST ESCALATES FOR AMBIGUOUS EMAILS
+  #other:
+    #group: Miscelaneous
+    #description: Anything that doesn’t match other categories.
 
   invoice.zanovar:
+    group: Zanovar
     description: An invoice from Synergy with a supply address containing 16 King William St or Bimbimbi.
     must_not_have:
       - terms_any: ["South Terrace"]
     must_have_any:
       - ["16 King WIlliam St", "Bimbimbi"]
 
-  swoop.invoice.Zanovar: 
+  swoop.invoice.Zanovar:
+    group: Zanovar
     description: An invoice from Swoop and is addressed to Yudi and NOT to Geidi.
-    
+
   vodafone:
+    group: Action Required
     description: An invoice from vodafone that requires a user to manually download the invoice.
 
   atlassian.jab:
+    group: Just A Baby
     description: An invoice from Atlassian with a site address indicated in the invoice attachment as justababy.atlassian.net.
     must_not_have:
       - terms_any: ["geidi.atlassian.net"]
@@ -107,6 +128,5 @@ taxonomy:
       - ["justababy.atlassian.net"]
 
   read.notification:
+    group: DELETE
     description: An email which is a notification confirming that the client received our email.
-      
-    
