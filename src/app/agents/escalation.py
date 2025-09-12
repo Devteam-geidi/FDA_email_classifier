@@ -1,54 +1,69 @@
 import json
 import os
-from app.agents.triage import load_yaml_rules
-from app.utils.rules import get_taxonomy_options
 from typing import List, Dict, Tuple
 from openai import OpenAI
 import httpx
-import yaml  # <-- add pyyaml in your deps if not already
+import yaml
 
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
 POWER_AUTOMATE_URL = os.getenv("POWER_AUTOMATE_URL")
 openai_client = OpenAI()
 
-def _extract_taxonomy_from_yaml(yaml_text: str) -> list[str]:
-    """Return the list of taxonomy keys from email_policy.yaml content."""
+# --- taxonomy parsing helpers ---
+
+def _extract_taxonomy(yaml_text: str) -> Dict[str, Dict]:
+    """
+    Returns the raw taxonomy dict from the policy YAML:
+      { "<key>": {"group": "...", ...}, ... }
+    """
     try:
         data = yaml.safe_load(yaml_text) or {}
-        taxonomy = data.get("taxonomy") or {}
-        return list(taxonomy.keys())
+        return (data.get("taxonomy") or {}) if isinstance(data, dict) else {}
     except Exception:
-        return []
+        return {}
 
-def _extract_taxonomy_keys(yaml_text: str) -> List[str]:
-    """Parse email_policy.yaml text and return sorted list of taxonomy keys."""
-    try:
-        data = yaml.safe_load(yaml_text) or {}
-        taxonomy = data.get("taxonomy", {}) or {}
-        keys = [str(k) for k in taxonomy.keys()]
-        # always include 'other' as a safety fallback
-        if "other" not in keys:
-            keys.append("other")
-        return sorted(keys)
-    except Exception:
-        # absolute fallback
-        return ["invoice.paid", "invoice.unpaid", "invoice.overdue", "task", "support", "spam", "newsletter", "other"]
+def _build_flat_and_grouped(taxonomy: Dict[str, Dict]) -> Tuple[List[str], Dict[str, List[str]]]:
+    """
+    Builds:
+      - flat list of keys (sorted, includes 'other' fallback)
+      - grouped map: { "<Group>": [taxonomy_keys...] }
+    If no 'other' taxon exists in the YAML, we synthesize it under group "Other".
+    """
+    grouped: Dict[str, List[str]] = {}
+    flat: List[str] = []
 
-def _extract_guideline_options(yaml_text: str) -> tuple[list[str], list[dict]]:
+    for key, meta in taxonomy.items():
+        grp = (meta or {}).get("group") or "Other"
+        grouped.setdefault(grp, []).append(key)
+        flat.append(key)
+
+    # ensure synthetic 'other' exists for safety
+    if "other" not in flat:
+        flat.append("other")
+        grouped.setdefault("Other", []).append("other")
+
+    # sort keys within each group and sort groups by name
+    for g in grouped:
+        grouped[g] = sorted(grouped[g])
+    flat = sorted(flat)
+
+    # ensure deterministic group order by recreating dict
+    grouped = dict(sorted(grouped.items(), key=lambda kv: kv[0].lower()))
+    return flat, grouped
+
+def _grouped_as_obj_list(grouped: Dict[str, List[str]]) -> List[Dict]:
     """
-    Returns:
-      flat_options: ["invoice.unpaid", "invoice.overdue", ...]
-      grouped_options: [{"title": key, "value": key}, ...] for UI pickers
+    Converts grouped map into UI-friendly array objects:
+      [{"group":"Accounts Payable","options":[...]} , ...]
     """
-    keys = _extract_taxonomy_from_yaml(yaml_text)
-    if "other" not in keys:
-        keys.append("other")
-    keys = sorted(keys)
-    grouped = [{"title": k, "value": k} for k in keys]
-    return keys, grouped
+    return [{"group": grp, "options": opts} for grp, opts in grouped.items()]
+
+# --- prompt ---
 
 def escalation_prompt(email, triage: dict, action: dict, yaml_rules: str,
-                      options: list[str], options_objs: list[dict]) -> str:
+                      flat_options: List[str],
+                      grouped_options: Dict[str, List[str]],
+                      grouped_objs: List[Dict]) -> str:
     return f"""
 SYSTEM:
 You are the escalation agent. The action agent flagged this email as needing human review. Summarize the situation clearly, include triage and action rationales, and propose the best guess classification. Do not execute actions.
@@ -56,55 +71,71 @@ You are the escalation agent. The action agent flagged this email as needing hum
 YAML_RULES:
 {yaml_rules}
 
-AVAILABLE_CLASSIFICATIONS (choose one of these, exactly as written):
-{json.dumps(options)}
+AVAILABLE_CLASSIFICATIONS_FLAT:
+{json.dumps(flat_options, ensure_ascii=False)}
 
-AVAILABLE_CLASSIFICATIONS_UI (for picklists):
-{json.dumps(options_objs)}
+AVAILABLE_CLASSIFICATIONS_GROUPED:
+{json.dumps(grouped_options, ensure_ascii=False)}
+
+AVAILABLE_CLASSIFICATIONS_GROUPED_OBJS:
+{json.dumps(grouped_objs, ensure_ascii=False)}
 
 TRIAGE:
-{json.dumps(triage)}
+{json.dumps(triage, ensure_ascii=False)}
 
 ACTION_AGENT:
-{json.dumps(action)}
+{json.dumps(action, ensure_ascii=False)}
 
 EMAIL SUBJECT: {email.subject}
 
 OUTPUT (JSON only):
 {{
-  "proposed_classification": "<one key from AVAILABLE_CLASSIFICATIONS>",
+  "proposed_classification": "<one key from AVAILABLE_CLASSIFICATIONS_FLAT>",
   "rationale": ["bullet evidence"],
-  "guideline_options": {json.dumps(options)},
-  "guideline_options_objs": {json.dumps(options_objs)}
+  "guideline_options": {json.dumps(flat_options, ensure_ascii=False)},
+  "guideline_options_grouped": {json.dumps(grouped_options, ensure_ascii=False)},
+  "guideline_options_grouped_objs": {json.dumps(grouped_objs, ensure_ascii=False)}
 }}
 """.strip()
 
-def run_escalation_agent(email, triage: dict, action: dict) -> dict:
-    from app.agents.triage import load_yaml_rules
-    yaml_rules = load_yaml_rules()
+# --- main entrypoint ---
 
-    flat_options, grouped_options = _extract_guideline_options(yaml_rules)
+def run_escalation_agent(email, triage: dict, action: dict) -> dict:
+    # Reuse the same YAML loader as triage uses
+    from app.agents.triage import load_yaml_rules
+    yaml_rules = load_yaml_rules()  # string contents of the policy file
+
+    taxonomy = _extract_taxonomy(yaml_rules)
+    flat_options, grouped_map = _build_flat_and_grouped(taxonomy)
+    grouped_objs = _grouped_as_obj_list(grouped_map)
+
     prompt = escalation_prompt(
         email, triage, action, yaml_rules,
-        options=flat_options,
-        options_objs=grouped_options
+        flat_options=flat_options,
+        grouped_options=grouped_map,
+        grouped_objs=grouped_objs,
     )
 
     resp = openai_client.responses.create(model=OPENAI_MODEL, input=prompt)
     text = resp.output_text
     try:
         parsed = json.loads(text)
+        # Guardrails: make sure classification is one of our flat options
         if parsed.get("proposed_classification") not in flat_options:
             parsed["proposed_classification"] = "other"
+
+        # Ensure all option structures are present even if the model omits them
         parsed.setdefault("guideline_options", flat_options)
-        parsed.setdefault("guideline_options_objs", grouped_options)
+        parsed.setdefault("guideline_options_grouped", grouped_map)
+        parsed.setdefault("guideline_options_grouped_objs", grouped_objs)
         return parsed
     except Exception:
         return {
             "proposed_classification": "other",
             "rationale": ["Parse error"],
             "guideline_options": flat_options,
-            "guideline_options_objs": grouped_options,
+            "guideline_options_grouped": grouped_map,
+            "guideline_options_grouped_objs": grouped_objs,
         }
 
 def send_to_power_automate(payload: dict) -> dict:
@@ -113,4 +144,3 @@ def send_to_power_automate(payload: dict) -> dict:
         return {"status": "ok", "resp": res.json()}
     except Exception as e:
         return {"status": "failed", "error": str(e)}
- 

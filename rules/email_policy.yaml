@@ -30,7 +30,7 @@ taxonomy:
     must_have:
       - terms_any: ["remittance", "payment advice", "paid amount", "remitted"]
 
-  soa:
+  statement of accounts:
     group: Accounts Payable
     description: Statement of Account sent by supplier.
     must_have:
@@ -42,7 +42,19 @@ taxonomy:
     must_have:
       - terms_any: ["dispute", "disputing", "incorrect charge", "charge dispute", "billing dispute"]
 
-  procurement.soa:
+  client.dispute.cssa:
+    group: Action Required
+    description: Client disputes that are for CSSA or ASO or sales.
+    must_have:
+      - terms_any: ["dispute", "update", "users", "change"]
+
+  action.required.suz:
+    group: Action Required
+    description: Internal or External tasks directed for Suzyn Shih.
+    must_have:
+      - terms_any: ["Suzyn", "Suz", "incorrect charge", "charge dispute", "billing dispute"]
+
+  procurement.statement of accounts:
     group: Accounts Payable
     description: Vendor statement of account related to procurement/purchasing.
     must_have:
@@ -59,12 +71,6 @@ taxonomy:
     description: Mail delivery failure/bounce notifications.
     must_have:
       - terms_any: ["delivery has failed", "undeliverable", "bounce", "returned mail", "mailer-daemon"]
-
-  client.request_copy_invoice:
-    group: Action Required
-    description: Client requests a copy of an invoice or invoice details.
-    must_have:
-      - terms_any: ["request copy", "send invoice copy", "copy of invoice", "resend invoice"]
 
   outsourced.invoice:
     group: Accounts Payable
