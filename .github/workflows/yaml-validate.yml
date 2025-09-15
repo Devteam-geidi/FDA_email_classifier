@@ -1,0 +1,17 @@
+# .github/workflows/yaml-validate.yml
+name: Validate email_policy.yaml
+on:
+  pull_request:
+    paths:
+      - email_policy.yaml
+
+jobs:
+  yaml-lint:
+    name: YAML syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install yamllint
+        run: sudo apt-get update && sudo apt-get install -y yamllint
+      - name: Lint email_policy.yaml
+        run: yamllint -d "{extends: default, rules: {line-length: disable}}" email_policy.yaml
