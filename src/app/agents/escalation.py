@@ -1,3 +1,12 @@
+import time, random, logging
+from openai import OpenAI
+from openai import APIError, APIConnectionError, RateLimitError, APITimeoutError
+try:
+    # InternalServerError is in recent SDKs; if not available, we’ll catch APIError anyway
+    from openai import InternalServerError
+except Exception:  # fallback for older SDKs
+    class InternalServerError(APIError): ...
+
 import json
 import os
 from typing import List, Dict, Tuple
@@ -9,8 +18,41 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5")
 POWER_AUTOMATE_URL = os.getenv("POWER_AUTOMATE_URL")
 openai_client = OpenAI()
 
+
+logger = logging.getLogger(__name__)
+
+# Create a client with a sensible timeout (seconds)
+openai_client = OpenAI(timeout=20)
+
+RETRY_EXCEPTIONS = (InternalServerError, APIError, APIConnectionError, APITimeoutError, RateLimitError)
+
 # --- taxonomy parsing helpers ---
 
+def _retry_call(func, *, attempts=4, base_delay=0.5, jitter=0.3, **kwargs):
+    """Generic retry with exponential backoff and jitter."""
+    for i in range(attempts):
+        try:
+            return func(**kwargs)
+        except RETRY_EXCEPTIONS as e:
+            last = (i == attempts - 1)
+            req_id = None
+            try:
+                req_id = getattr(getattr(e, "response", None), "headers", {}).get("x-request-id")
+            except Exception:
+                pass
+            logger.warning(
+                "Escalation LLM call failed (attempt %s/%s). request_id=%s err=%s",
+                i + 1, attempts, req_id, repr(e),
+            )
+            if last:
+                raise
+            sleep_for = base_delay * (2 ** i) + random.uniform(0, jitter)
+            time.sleep(sleep_for)
+
+def _call_escalation_llm(prompt: str):
+    # NOTE: adjust model variable if needed
+    return openai_client.responses.create(model=OPENAI_MODEL, input=prompt)
+    
 def _extract_taxonomy(yaml_text: str) -> Dict[str, Dict]:
     """
     Returns the raw taxonomy dict from the policy YAML:
@@ -116,7 +158,31 @@ def run_escalation_agent(email, triage: dict, action: dict) -> dict:
         grouped_objs=grouped_objs,
     )
 
-    resp = openai_client.responses.create(model=OPENAI_MODEL, input=prompt)
+    # --- PATCH: add retries + graceful degradation ---
+    try:
+        resp = _retry_call(_call_escalation_llm, prompt=prompt)
+    except RETRY_EXCEPTIONS as e:
+        req_id = None
+        try:
+            req_id = getattr(getattr(e, "response", None), "headers", {}).get("x-request-id")
+        except Exception:
+            pass
+        logger.exception("Escalation agent failed after retries. request_id=%s", req_id)
+
+        # Degrade gracefully: return a structured result so upstream stays 200 OK
+        return {
+            "status": "skipped",
+            "reason": "escalation_llm_error",
+            "error": str(e),
+            "request_id": req_id,
+            "proposed_classification": "other",
+            "rationale": ["Escalation LLM error; fallback used"],
+            "guideline_options": flat_options,
+            "guideline_options_grouped": grouped_map,
+            "guideline_options_grouped_objs": grouped_objs,
+        }
+    # ---------------------------------------------------
+
     text = resp.output_text
     try:
         parsed = json.loads(text)
