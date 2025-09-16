@@ -4,6 +4,7 @@ from typing import Dict, List, Tuple
 import re
 from supabase import Client
 from app.utils.policy_edit import load_policy, save_policy, upsert_class
+from app.utils.gh_actions import dispatch_policy_workflow
 
 STOP = set("""
 a an and are as at be but by for from has have if in into is it of on or our so that the their this to was were will with your you we they he she them his her its not no
