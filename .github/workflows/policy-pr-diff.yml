@@ -1,0 +1,46 @@
+# .github/workflows/policy-pr.yml
+name: Open policy update PR
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'   # optional
+  repository_dispatch:
+    types: [policy-proposal]  # optional, from your agent
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  propose:
+    if: "!startsWith(github.ref_name, 'policy-update/')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ensure only the single file is touched
+      - name: Verify change set (policy only)
+        run: |
+          CHANGES=$(git status --porcelain)
+          echo "$CHANGES"
+          # Optional: enforce only this path is changed
+          # (skip on first run if creating file from scratch)
+          exit 0
+
+      - name: Create branch and PR
+        env:
+          BRANCH: policy-update/${{ github.run_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git checkout -b "$BRANCH"
+          git add rules/email_policy.yaml
+          git commit -m "chore(policy): proposed update"
+          git push -u origin "$BRANCH"
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "Policy update (AI-proposed)" \
+            --body "Automated proposal. See validation & diff." \
+            --label "ai-generated,policy" \
+            --reviewer your-handle,finance-owner

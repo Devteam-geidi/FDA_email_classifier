@@ -1,17 +1,44 @@
 # .github/workflows/yaml-validate.yml
-name: Validate email_policy.yaml
+name: Validate policy YAML
+
 on:
   pull_request:
     paths:
-      - email_policy.yaml
+      - 'rules/email_policy.yaml'
+      - '.github/policy-schema.json'
+
+permissions:
+  contents: read
 
 jobs:
-  yaml-lint:
-    name: YAML syntax
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install yamllint
-        run: sudo apt-get update && sudo apt-get install -y yamllint
-      - name: Lint email_policy.yaml
-        run: yamllint -d "{extends: default, rules: {line-length: disable}}" email_policy.yaml
+
+      # 1) Basic syntax check
+      - name: Check YAML syntax
+        run: |
+          python - <<'PY'
+          import sys, yaml
+          with open("rules/email_policy.yaml") as f:
+              yaml.safe_load(f)
+          print("OK: YAML parsed")
+          PY
+
+      # 2) Schema validation (yaml -> json -> ajv)
+      - name: Install ajv
+        run: npm i -g ajv-cli
+
+      - name: Convert YAML -> JSON
+        run: |
+          python - <<'PY'
+          import json, yaml
+          j = yaml.safe_load(open("rules/email_policy.yaml"))
+          open("rules/email_policy.json","w").write(json.dumps(j))
+          print("Wrote rules/email_policy.json")
+          PY
+
+      - name: Validate against schema
+        run: |
+          ajv validate -s .github/policy-schema.json -d rules/email_policy.json --strict=false
