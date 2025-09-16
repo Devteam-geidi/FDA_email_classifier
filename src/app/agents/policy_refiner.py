@@ -119,7 +119,13 @@ def update_policy_from_logs(supabase: Client) -> Dict:
         )
 
     save_policy(policy)
+
+    # ✅ NEW: Trigger GitHub Action to create branch + PR
+    from app.utils.gh_actions import dispatch_policy_workflow
+    dispatch_policy_workflow()
+
     return {
         "updated_classes": list(suggestions.keys()),
         "counts": {k: len(v) for k, v in samples.items()}
     }
+
