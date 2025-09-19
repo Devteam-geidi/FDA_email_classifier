@@ -85,7 +85,7 @@ def _normalize_n8n_payload(raw: Dict[str, Any]) -> "EmailPayload":
         attachments.append(Attachment(filename=fname, content_type=ctype, download_url=link))
 
     return EmailPayload(
-        account=raw.get("account"),
+        account=raw.get("Account"),
         message_id=str(msg_id),
         internet_message_id=str(internet_id),
         subject=str(subject),
