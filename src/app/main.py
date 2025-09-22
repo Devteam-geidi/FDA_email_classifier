@@ -70,7 +70,7 @@ def _normalize_n8n_payload(raw: Dict[str, Any]) -> "EmailPayload":
     # {
     #   subject, body, from_address, message_id, in_reply_to, attachment_links: []
     # }
-    account = raw.get("Account")
+    account = raw.get("account")
     subject = raw.get("subject") or ""
     body_text = raw.get("body") or raw.get("body_text") or ""
     msg_id = raw.get("message_id") or subject or "missing-id"

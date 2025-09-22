@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:omgdc="http://www.omg.org/spec/DD/20100524/DC" xmlns:omgdi="http://www.omg.org/spec/DD/20100524/DI" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" id="Definitions_EmailFlow" targetNamespace="http://geidi.com/bpmn/email-orchestrator" exporter="Camunda Modeler" exporterVersion="5.37.0">
+  <bpmn:process id="Email_Processing_Cloud" name="Email Processing (Camunda 8 / Zeebe)" isExecutable="true">
+    <bpmn:startEvent id="Start_Ingest" name="Email Ingested (/ingest)">
+      <bpmn:outgoing>Flow_0hdtlpu</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_Ingest" name="Normalize &#38; Log Email">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="ingest" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="email" target="email" />
+          <zeebe:output source="email.internet_message_id" target="email_id" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_0hdtlpu</bpmn:incoming>
+      <bpmn:outgoing>Flow_Triage</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_Triage" name="Triage Agent">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="triage" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="email" target="email" />
+          <zeebe:output source="result" target="triage" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Triage</bpmn:incoming>
+      <bpmn:outgoing>Flow_ActionPlan</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_ActionPlan" name="Action Agent Plan">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="action-plan" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="email" target="email" />
+          <zeebe:input source="triage" target="triage" />
+          <zeebe:output source="result" target="action" />
+          <zeebe:output source="action.agree and (not action.needs_human_review) and (action.final_confidence &#62;= min_autopilot)" target="autopilot" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ActionPlan</bpmn:incoming>
+      <bpmn:outgoing>Flow_Decision_Gateway</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_AutoOrEscalate" name="Autopilot or Escalation?">
+      <bpmn:incoming>Flow_Decision_Gateway</bpmn:incoming>
+      <bpmn:outgoing>Flow_Autopilot</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Escalate</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_Autopilot" name="Execute Actions (n8n)">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="autopilot-execute" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="action.actions" target="actions" />
+          <zeebe:input source="email_id" target="email_id" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Autopilot</bpmn:incoming>
+      <bpmn:incoming>Flow_1bki7ik</bpmn:incoming>
+      <bpmn:outgoing>Flow_End_From_Autopilot</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_Escalation" name="Escalation Agent &#38; Power Automate">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="escalation" retries="3" />
+        <zeebe:ioMapping>
+          <zeebe:input source="email" target="email" />
+          <zeebe:input source="triage" target="triage" />
+          <zeebe:input source="action" target="action" />
+          <zeebe:output source="result" target="escalation" />
+        </zeebe:ioMapping>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Escalate</bpmn:incoming>
+      <bpmn:outgoing>Flow_WaitHuman</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="Task_Human" name="Human Feedback (/feedback)">
+      <bpmn:extensionElements>
+        <zeebe:assignmentDefinition assignee="accounts-team" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_WaitHuman</bpmn:incoming>
+      <bpmn:outgoing>Flow_1bki7ik</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="End_Process" name="Process Complete">
+      <bpmn:incoming>Flow_End_From_Autopilot</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_Triage" sourceRef="Task_Ingest" targetRef="Task_Triage" />
+    <bpmn:sequenceFlow id="Flow_ActionPlan" sourceRef="Task_Triage" targetRef="Task_ActionPlan" />
+    <bpmn:sequenceFlow id="Flow_Decision_Gateway" sourceRef="Task_ActionPlan" targetRef="Gateway_AutoOrEscalate" />
+    <bpmn:sequenceFlow id="Flow_Autopilot" name="Autopilot" sourceRef="Gateway_AutoOrEscalate" targetRef="Task_Autopilot">
+      <bpmn:conditionExpression xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="bpmn:tFormalExpression">= autopilot</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Escalate" name="Escalation" sourceRef="Gateway_AutoOrEscalate" targetRef="Task_Escalation">
+      <bpmn:conditionExpression xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="bpmn:tFormalExpression">= not autopilot</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_WaitHuman" sourceRef="Task_Escalation" targetRef="Task_Human" />
+    <bpmn:sequenceFlow id="Flow_End_From_Autopilot" sourceRef="Task_Autopilot" targetRef="End_Process" />
+    <bpmn:sequenceFlow id="Flow_1bki7ik" sourceRef="Task_Human" targetRef="Task_Autopilot" />
+    <bpmn:sequenceFlow id="Flow_0hdtlpu" sourceRef="Start_Ingest" targetRef="Task_Ingest" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Email_Processing_Cloud">
+      <bpmndi:BPMNShape id="Shape_Ingest" bpmnElement="Task_Ingest">
+        <omgdc:Bounds x="230" y="140" width="140" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Triage" bpmnElement="Task_Triage">
+        <omgdc:Bounds x="410" y="140" width="140" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_ActionPlan" bpmnElement="Task_ActionPlan">
+        <omgdc:Bounds x="590" y="140" width="160" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Gateway" bpmnElement="Gateway_AutoOrEscalate" isMarkerVisible="true">
+        <omgdc:Bounds x="800" y="155" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds x="796.5" y="115.5" width="57" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Start" bpmnElement="Start_Ingest">
+        <omgdc:Bounds x="150" y="162" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds x="133" y="205" width="73" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Autopilot" bpmnElement="Task_Autopilot">
+        <omgdc:Bounds x="1110" y="140" width="180" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Escalation" bpmnElement="Task_Escalation">
+        <omgdc:Bounds x="860" y="280" width="220" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Human" bpmnElement="Task_Human">
+        <omgdc:Bounds x="1110" y="280" width="180" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_End" bpmnElement="End_Process">
+        <omgdc:Bounds x="1352" y="162" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds x="1325" y="203" width="90" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Edge_Flow_Triage" bpmnElement="Flow_Triage">
+        <omgdi:waypoint x="370" y="180" />
+        <omgdi:waypoint x="410" y="180" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_ActionPlan" bpmnElement="Flow_ActionPlan">
+        <omgdi:waypoint x="550" y="180" />
+        <omgdi:waypoint x="590" y="180" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Decision" bpmnElement="Flow_Decision_Gateway">
+        <omgdi:waypoint x="750" y="180" />
+        <omgdi:waypoint x="800" y="180" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Autopilot" bpmnElement="Flow_Autopilot">
+        <omgdi:waypoint x="850" y="180" />
+        <omgdi:waypoint x="1110" y="180" />
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds x="959" y="162" width="43" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_Escalate" bpmnElement="Flow_Escalate">
+        <omgdi:waypoint x="825" y="205" />
+        <omgdi:waypoint x="825" y="320" />
+        <omgdi:waypoint x="860" y="320" />
+        <bpmndi:BPMNLabel>
+          <omgdc:Bounds x="834" y="243" width="51" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0hdtlpu_di" bpmnElement="Flow_0hdtlpu">
+        <omgdi:waypoint x="186" y="180" />
+        <omgdi:waypoint x="230" y="180" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_1bki7ik_di" bpmnElement="Flow_1bki7ik">
+        <omgdi:waypoint x="1200" y="280" />
+        <omgdi:waypoint x="1200" y="220" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_End_Autopilot" bpmnElement="Flow_End_From_Autopilot">
+        <omgdi:waypoint x="1290" y="180" />
+        <omgdi:waypoint x="1352" y="180" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Flow_WaitHuman" bpmnElement="Flow_WaitHuman">
+        <omgdi:waypoint x="1080" y="320" />
+        <omgdi:waypoint x="1110" y="320" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
