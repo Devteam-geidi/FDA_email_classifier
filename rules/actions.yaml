@@ -54,6 +54,16 @@ classifications:
     actions:
       - move:
           folder_id: "{env:FOLDER_REM}"
+      - create_jira:
+          project: "{env:JIRA_PROJECT_KEY}"
+          issue_type: "{env:JIRA_ISSUE_TYPE_TASK}"
+          assignee: "{env:JIRA_ASSIGNEE_RUTH}"
+          summary: "{subject}"
+          priority: "{env:JIRA_PRIORITY_MEDIUM}"
+          customfield_10482: "{env:JIRA_EMAIL_CATEGORY_CLIENT}"   # Email Category
+          customfield_10449: "{env:JIRA_TASK_TYPE_ONCE_OFF}"        # Task Type
+          customfield_10515: "{env:JIRA_ENTITY_GEIDI_PTY}"          # Entity
+          transition: "{env:JIRA_TRANSITION_UPNEXT}"
 
   statement of accounts:
     actions:
