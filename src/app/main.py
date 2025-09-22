@@ -70,7 +70,7 @@ def _normalize_n8n_payload(raw: Dict[str, Any]) -> "EmailPayload":
     # {
     #   subject, body, from_address, message_id, in_reply_to, attachment_links: []
     # }
-    account = raw.get("account")
+    account = raw.get("Account")
     subject = raw.get("subject") or ""
     body_text = raw.get("body") or raw.get("body_text") or ""
     msg_id = raw.get("message_id") or subject or "missing-id"
@@ -216,7 +216,7 @@ def ingest_email(email_raw: Dict[str, Any]):
 
         escalation_result = run_escalation_agent(email_for_agents, triage_result, action_result)
         escalation_payload = {
-            "account": account, 
+            "account": email.account, 
             "email": email.model_dump(),
             "triage": triage_result,
             "action": action_result,
