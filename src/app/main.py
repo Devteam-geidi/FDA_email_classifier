@@ -59,6 +59,7 @@ class FeedbackPayload(BaseModel):
     nhr_token: str
     human: str | None = None
     final_classification: str
+    account: str | None = None
 
 def _normalize_n8n_payload(raw: Dict[str, Any]) -> "EmailPayload":
     """Accepts either our rich EmailPayload or simplified n8n body and returns EmailPayload."""
@@ -315,6 +316,7 @@ def feedback(p: FeedbackPayload):
 
     email = _normalize_n8n_payload(
         {
+            "Account": p.account,  # <-- prefer the value sent by Power Automate
             "subject": email_log["subject"],
             "body": email_log.get("body_text") or "",
             "from_address": email_log.get("from_email") or "",
