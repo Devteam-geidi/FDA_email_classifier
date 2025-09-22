@@ -67,6 +67,7 @@ from ..utils.tools import call_tool
 def execute_actions(email, action_result: Dict[str, Any], supabase=None) -> List[Dict[str, Any]]:
     receipts: List[Dict[str, Any]] = []
     meta = {
+        "account": getattr(email, "account", None),
         "message_id": email.message_id,
         "internet_message_id": email.internet_message_id,
         "subject": email.subject,
