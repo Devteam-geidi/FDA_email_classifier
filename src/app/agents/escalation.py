@@ -22,7 +22,7 @@ openai_client = OpenAI()
 logger = logging.getLogger(__name__)
 
 # Create a client with a sensible timeout (seconds)
-openai_client = OpenAI(timeout=20)
+openai_client = OpenAI(timeout=120)
 
 RETRY_EXCEPTIONS = (InternalServerError, APIError, APIConnectionError, APITimeoutError, RateLimitError)
 
